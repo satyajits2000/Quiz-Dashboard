@@ -527,9 +527,14 @@ const firebaseConfig = {
 
 let db;
 try {
-  const app = initializeApp(firebaseConfig, 'dashboard');
-  db = getDatabase(app);
-} catch(e) { console.warn('Firebase init failed', e.message); }
+  if (firebaseConfig.apiKey === 'YOUR_API_KEY') {
+    console.warn('⚠️ Firebase not configured — fill in your config to enable live features');
+  } else {
+    const app = initializeApp(firebaseConfig, 'dashboard');
+    db = getDatabase(app);
+    console.log('✅ Firebase connected');
+  }
+} catch(e) { console.warn('Firebase init failed:', e.message); }
 
 window._firebase = { db, ref, set, push, onValue, get, update };
 
@@ -553,7 +558,17 @@ window.listenParticipants = function(sessionId) {
 };
 
 window.firebaseCreateSession = async function(data) {
-  if (!db) { showToast('⚠️ Firebase not configured'); return null; }
+  if (!db) {
+    // Offline mode — store locally so the UI still works
+    const fakeKey = 'local_' + Date.now();
+    window._sessions = window._sessions || {};
+    // Mark all others inactive
+    Object.keys(window._sessions).forEach(k => window._sessions[k].status = 'inactive');
+    window._sessions[fakeKey] = data;
+    window.renderSessions(window._sessions);
+    window.populateSelector(window._sessions);
+    return fakeKey;
+  }
   try {
     const snap = await get(ref(db, 'sessions'));
     if (snap.exists()) {
@@ -564,7 +579,7 @@ window.firebaseCreateSession = async function(data) {
     const nr = push(ref(db, 'sessions'));
     await set(nr, data);
     return nr.key;
-  } catch(e) { console.error(e); return null; }
+  } catch(e) { console.error('createSession error:', e); return null; }
 };
 
 window.loadSessions();
@@ -653,13 +668,21 @@ function loadSession(id) {
 }
 
 async function activateSession(id) {
-  if (!window._firebase?.db) return;
-  const { db, ref, update } = window._firebase;
-  const upd = {};
-  Object.keys(window._sessions||{}).forEach(k => upd[`sessions/${k}/status`] = 'inactive');
-  upd[`sessions/${id}/status`] = 'active';
-  await update(ref(db), upd);
-  showToast('Session activated!');
+  if (!window._firebase?.db) {
+    showToast('⚠️ Firebase not configured — cannot activate');
+    return;
+  }
+  try {
+    const { db, ref, update } = window._firebase;
+    const upd = {};
+    Object.keys(window._sessions||{}).forEach(k => upd[`sessions/${k}/status`] = 'inactive');
+    upd[`sessions/${id}/status`] = 'active';
+    await update(ref(db), upd);
+    showToast('✅ Session activated!');
+  } catch(e) {
+    showToast('❌ Activate failed — check Firebase permissions');
+    console.error(e);
+  }
 }
 
 // ── Participant rendering ─────────────────────────────────────
@@ -838,7 +861,18 @@ document.getElementById('modal-overlay').addEventListener('click', e => { if (e.
 
 async function createSession() {
   const name = document.getElementById('m-name').value.trim();
-  if (!name) { alert('Session name is required'); return; }
+  if (!name) { showToast('⚠️ Session name is required'); return; }
+
+  // Check Firebase is ready
+  if (!window.firebaseCreateSession) {
+    showToast('⚠️ Firebase not ready — check your config');
+    return;
+  }
+
+  const btn = document.querySelector('#modal-overlay .btn-red');
+  const orig = btn.textContent;
+  btn.textContent = 'Creating…'; btn.disabled = true;
+
   const data = {
     name,
     date       : document.getElementById('m-date').value,
@@ -850,12 +884,24 @@ async function createSession() {
     createdAt  : new Date().toISOString(),
     participants: {}
   };
-  const key = await window.firebaseCreateSession(data);
-  if (key) {
-    closeModal();
-    showToast('✅ Session created and activated!');
-    ['m-name','m-loc','m-facilitator','m-notes'].forEach(id => document.getElementById(id).value='');
+
+  try {
+    const key = await window.firebaseCreateSession(data);
+    if (key) {
+      closeModal();
+      showToast('✅ Session created and activated!');
+      ['m-name','m-loc','m-facilitator','m-notes'].forEach(id => document.getElementById(id).value='');
+      // Navigate to Sessions view so user can see the new session
+      showView('sessions');
+    } else {
+      showToast('❌ Could not create session — check Firebase config');
+    }
+  } catch(e) {
+    showToast('❌ Error: ' + e.message);
+    console.error(e);
   }
+
+  btn.textContent = orig; btn.disabled = false;
 }
 
 // ── Export CSV ────────────────────────────────────────────────
