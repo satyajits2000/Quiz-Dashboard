@@ -237,6 +237,18 @@ tr:last-child td { border-bottom:none; }
 }
 #toast.show { transform:translateX(-50%) translateY(0); }
 
+/* ── Answer breakdown ── */
+.ans-row { display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:0.83em; }
+.ans-row:last-child { border-bottom:none; }
+.ans-num  { width:22px;height:22px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.72em;font-weight:700; }
+.ans-ok   { background:var(--green-bg);color:var(--green); }
+.ans-fail { background:#fdecea;color:var(--red); }
+.ans-text { flex:1;line-height:1.45;color:var(--text); }
+.ans-label{ font-size:0.7em;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);margin-bottom:2px; }
+/* Delete button */
+.btn-del { background:transparent;color:var(--red);border:1.5px solid var(--red); }
+.btn-del:hover { background:var(--red);color:#fff; }
+
 /* ── Responsive ── */
 @media(max-width:900px){
   .sidebar{display:none}
@@ -395,7 +407,7 @@ tr:last-child td { border-bottom:none; }
       <div class="card">
         <div class="table-wrap">
           <table><thead><tr>
-            <th>#</th><th>Name</th><th>Entity</th><th>Dept</th><th>Email</th>
+            <th>#</th><th>Name</th><th>Entity</th><th>Dept</th><th>Email</th><th>Detail</th>
             <th>Quiz</th><th>Score</th><th>Progress</th><th>Status</th><th>Start Time</th><th>Duration</th>
           </tr></thead>
           <tbody id="all-tbody">
@@ -468,6 +480,31 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- Participant Detail Modal -->
+<div class="overlay" id="modal-participant">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title" id="pd-name">Participant Answers</div>
+    <div class="modal-sub" id="pd-meta">—</div>
+    <div id="pd-answers" style="max-height:420px;overflow-y:auto;margin-bottom:16px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closePDModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Session Modal -->
+<div class="overlay" id="modal-delete">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title" style="color:var(--red)">⚠️ Delete Session</div>
+    <div class="modal-sub">This will permanently delete the session and all participant data. This cannot be undone.</div>
+    <div id="del-session-name" style="background:#fdecea;border:1px solid #f5c2c2;border-radius:6px;padding:12px;margin-bottom:8px;font-weight:600;color:var(--red)"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeDeleteModal()">Cancel</button>
+      <button class="btn btn-red"   id="confirm-delete-btn" onclick="confirmDeleteSession()">Delete Permanently</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast">✅ Done!</div>
 
 <!-- Firebase -->
@@ -479,17 +516,14 @@ import { getDatabase, ref, set, push, onValue, get, update } from "https://www.g
    🔥  FIREBASE CONFIGURATION  — same as both quiz files
 ──────────────────────────────────────────────────────────────── */
 const firebaseConfig = {
-  apiKey: "AIzaSyDQaDGAOslmVabYfMp7erAVDCzCXhAUj7c",
-  authDomain: "quality-quiz-5d8fa.firebaseapp.com",
-  databaseURL: "https://quality-quiz-5d8fa-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "quality-quiz-5d8fa",
-  storageBucket: "quality-quiz-5d8fa.firebasestorage.app",
-  messagingSenderId: "200263271557",
-  appId: "1:200263271557:web:24908b21ce8d7bb1a795ec",
-  measurementId: "G-7C8C9Y2TJH"
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID"
 };
-
-
 
 let db;
 try {
@@ -547,9 +581,14 @@ function showView(v) {
     document.getElementById(`view-${x}`).style.display = x===v?'block':'none';
   });
   document.querySelectorAll('.nav-item').forEach(el => {
-    const t = el.textContent.trim().toLowerCase();
-    el.classList.toggle('active', t.startsWith(v));
+    // match by onclick attribute text, not inner text (which has emoji)
+    const oc = el.getAttribute('onclick') || '';
+    el.classList.toggle('active', oc.includes(`'${v}'`));
   });
+  // Always re-render sessions list when that tab is opened
+  if (v === 'sessions' && window._sessions) {
+    window.renderSessions(window._sessions);
+  }
 }
 
 // ── Session rendering ─────────────────────────────────────────
@@ -576,6 +615,7 @@ window.renderSessions = function(sessions) {
         <span class="badge b-teal">${s.quizType||'Both'}</span>
         ${!active?`<button class="btn btn-green btn-sm" onclick="activateSession('${id}')">Activate</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="loadSession('${id}')">View</button>
+        <button class="btn btn-del btn-sm" onclick="askDeleteSession('${id}','${(s.name||'Unnamed').replace(/'/g,"\\'")}')">🗑 Delete</button>
       </div>
     `;
     list.appendChild(row);
@@ -632,6 +672,15 @@ window.renderParticipantData = function(data) {
   renderChart(allParticipants);
 };
 
+// Derive totalQ dynamically from the participant's own data
+// Priority: explicit totalQ field → answers.length (completed only) → quiz default
+function getTotal(p) {
+  if (p.totalQ && p.totalQ > 0)           return p.totalQ;           // set by quiz on registration
+  if (p.status === 'completed' && p.answers && p.answers.length > 0)
+                                           return p.answers.length;   // completed = all answered
+  return p.quiz === 'redbook' ? 16 : 10;                              // safe fallback
+}
+
 function getFiltered() {
   let p = allParticipants;
   const qf = (document.getElementById('quiz-filter')?.value||'');
@@ -651,7 +700,7 @@ function updateStats() {
   const f = getFiltered();
   const done = f.filter(p=>p.status==='completed');
   const inp  = f.filter(p=>p.status==='in_progress');
-  const pcts = done.map(p=>{ const t=p.quiz==='redbook'?16:15; return Math.round((p.finalScore??p.score??0)/t*100); });
+  const pcts = done.map(p=>{ const t=getTotal(p); return Math.round((p.finalScore??p.score??0)/t*100); });
   const avg  = pcts.length ? Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length) : null;
   document.getElementById('stat-total').textContent     = f.length;
   document.getElementById('stat-completed').textContent = done.length;
@@ -674,7 +723,7 @@ function renderRecent(participants) {
   const tb = document.getElementById('recent-tbody');
   if (!participants.length) { tb.innerHTML='<tr><td colspan="7"><div class="empty"><span class="emo">📡</span>No participants yet</div></td></tr>'; return; }
   tb.innerHTML = participants.map(p => {
-    const total = p.quiz==='redbook'?16:15;
+    const total = getTotal(p);
     const score = p.finalScore??p.score??0;
     const pct   = Math.round(score/total*100);
     const prog  = Math.round((p.progress||0)/total*100);
@@ -696,20 +745,22 @@ function renderRecent(participants) {
 
 function renderAll(participants) {
   const tb = document.getElementById('all-tbody');
-  if (!participants.length) { tb.innerHTML='<tr><td colspan="11"><div class="empty"><span class="emo">👥</span>No participants</div></td></tr>'; return; }
+  if (!participants.length) { tb.innerHTML='<tr><td colspan="12"><div class="empty"><span class="emo">👥</span>No participants</div></td></tr>'; return; }
   tb.innerHTML = participants.map((p,i) => {
-    const total = p.quiz==='redbook'?16:15;
+    const total = getTotal(p);
     const score = p.finalScore??p.score??0;
     const pct   = Math.round(score/total*100);
     const prog  = Math.round((p.progress||0)/total*100);
     let dur = '—';
     if (p.startTime&&p.endTime) { const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000); dur=s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`; }
+    const pJson = encodeURIComponent(JSON.stringify(p));
     return `<tr>
       <td style="color:var(--muted)">${i+1}</td>
       <td><b>${p.name||'—'}</b></td>
       <td>${p.entity||'—'}</td>
       <td style="color:var(--muted)">${p.dept||'—'}</td>
       <td style="color:var(--muted);font-size:0.8em">${p.email||'—'}</td>
+      <td><button class="btn btn-teal btn-sm" onclick="openParticipant(decodeP('${pJson}'))">📋 Answers</button></td>
       <td>${p.quiz==='redbook'?'📕 Red Book':'✅ Quality Days'}</td>
       <td><span style="font-weight:700;color:${scoreColor(pct)}">${score}/${total} (${pct}%)</span></td>
       <td><div class="prog-mini"><div class="prog-fill" style="width:${prog}%;background:var(--teal)"></div></div> <span style="font-size:0.76em;color:var(--muted)">${p.progress||0}/${total}</span></td>
@@ -726,7 +777,7 @@ function renderDist(participants) {
   const done = participants.filter(p=>p.status==='completed');
   const b = {'0–39':0,'40–59':0,'60–74':0,'75–89':0,'90–100':0};
   done.forEach(p => {
-    const total = p.quiz==='redbook'?16:15;
+    const total = getTotal(p);
     const pct   = Math.round((p.finalScore??p.score??0)/total*100);
     if (pct<40) b['0–39']++;
     else if (pct<60) b['40–59']++;
@@ -813,7 +864,7 @@ function exportCSV() {
   if (!data.length) { showToast('No data to export'); return; }
   const headers = ['Name','Entity','Department','Email','Quiz','Score','Total','Percentage','Progress','Status','StartTime','EndTime','Duration(s)'];
   const rows = data.map(p => {
-    const total = p.quiz==='redbook'?16:15;
+    const total = getTotal(p);
     const score = p.finalScore??p.score??0;
     const pct   = Math.round(score/total*100);
     const dur   = (p.startTime&&p.endTime)?Math.round((new Date(p.endTime)-new Date(p.startTime))/1000):'';
@@ -839,6 +890,127 @@ function refreshData() {
 }
 
 // ── Toast ─────────────────────────────────────────────────────
+// ── Helper: decode participant JSON from attribute ────────────
+function decodeP(encoded) {
+  try { return JSON.parse(decodeURIComponent(encoded)); } catch { return {}; }
+}
+
+// ── Participant answer drill-down ─────────────────────────────
+function openParticipant(p) {
+  const total = getTotal(p);
+  const score = p.finalScore ?? p.score ?? 0;
+  const pct   = Math.round((score / total) * 100);
+  const dur   = (p.startTime && p.endTime)
+    ? (() => { const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000); return s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`; })()
+    : '—';
+
+  document.getElementById('pd-name').textContent = (p.name || '—') + (p.entity ? ' · ' + p.entity : '');
+  document.getElementById('pd-meta').innerHTML =
+    '<b>' + (p.quiz==='redbook'?'📕 Red Book':'✅ Quality Days') + '</b> &nbsp;·&nbsp; ' +
+    'Score: <b style="color:' + scoreColor(pct) + '">' + score + '/' + total + ' (' + pct + '%)</b> &nbsp;·&nbsp; ' +
+    '<span class="badge ' + (p.status==='completed'?'b-green':'b-amber') + '">' + (p.status==='completed'?'Completed':'In Progress') + '</span>' +
+    (p.dept  ? ' &nbsp;·&nbsp; ' + p.dept  : '') +
+    (p.email ? ' &nbsp;·&nbsp; ' + p.email : '') +
+    ' &nbsp;·&nbsp; ⏱ ' + dur;
+
+  const container = document.getElementById('pd-answers');
+  const answers   = p.answers || [];
+  const correct   = answers.filter(function(a){return a.correct;}).length;
+  const incorrect = answers.length - correct;
+  const unanswered = total - answers.length;
+
+  // Build a row for every question 1..total
+  var rows = '';
+  for (var i = 0; i < total; i++) {
+    var a = answers[i];
+    if (!a) {
+      rows += '<div class="ans-row"><div class="ans-num" style="background:#f0f2f4;color:var(--muted);font-size:1em">–</div>' +
+              '<div class="ans-text"><div class="ans-label">Q' + (i+1) + '</div>' +
+              '<span style="color:var(--muted);font-style:italic">Not yet answered</span></div></div>';
+    } else if (a.correct) {
+      rows += '<div class="ans-row"><div class="ans-num ans-ok" style="font-size:1em">✓</div>' +
+              '<div class="ans-text"><div class="ans-label">Q' + (i+1) + '</div>' +
+              '<span style="color:var(--green);font-weight:700">Correct</span></div></div>';
+    } else {
+      rows += '<div class="ans-row"><div class="ans-num ans-fail" style="font-size:1em">✗</div>' +
+              '<div class="ans-text"><div class="ans-label">Q' + (i+1) + '</div>' +
+              '<span style="color:var(--red);font-weight:700">Incorrect</span></div></div>';
+    }
+  }
+
+  container.innerHTML =
+    '<div style="background:var(--grey);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:0.83em;display:flex;gap:20px;flex-wrap:wrap;align-items:center">' +
+    '<span style="color:var(--green);font-weight:700">✓ ' + correct + ' correct</span>' +
+    '<span style="color:var(--red);font-weight:700">✗ ' + incorrect + ' incorrect</span>' +
+    (unanswered > 0 ? '<span style="color:var(--muted)">– ' + unanswered + ' unanswered</span>' : '') +
+    '<span style="color:var(--muted);margin-left:auto">' + answers.length + '/' + total + ' answered</span>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px">' + rows + '</div>';
+
+  document.getElementById('modal-participant').classList.add('open');
+}
+
+function closePDModal() { document.getElementById('modal-participant').classList.remove('open'); }
+document.getElementById('modal-participant').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-participant')) closePDModal();
+});
+
+// ── Session delete ────────────────────────────────────────────
+let sessionToDelete = null;
+
+function askDeleteSession(id, name) {
+  sessionToDelete = id;
+  document.getElementById('del-session-name').textContent = `"${name}"`;
+  document.getElementById('modal-delete').classList.add('open');
+}
+
+function closeDeleteModal() {
+  document.getElementById('modal-delete').classList.remove('open');
+  sessionToDelete = null;
+}
+
+document.getElementById('modal-delete').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-delete')) closeDeleteModal();
+});
+
+async function confirmDeleteSession() {
+  if (!sessionToDelete) return;
+  const btn = document.getElementById('confirm-delete-btn');
+  btn.textContent = 'Deleting…'; btn.disabled = true;
+
+  if (!window._firebase?.db) {
+    // Offline / not configured — just remove from local state
+    if (window._sessions) delete window._sessions[sessionToDelete];
+    window.renderSessions(window._sessions || {});
+    window.populateSelector(window._sessions || {});
+    closeDeleteModal();
+    showToast('🗑️ Session removed (offline mode)');
+    btn.textContent = 'Delete Permanently'; btn.disabled = false;
+    return;
+  }
+
+  try {
+    const { db, ref, update } = window._firebase;
+    const upd = {};
+    upd[`sessions/${sessionToDelete}`] = null;  // null = delete in Firebase RTDB
+    await update(ref(db), upd);
+    // If deleted session was selected, clear selection
+    if (currentSessionId === sessionToDelete) {
+      currentSessionId = null;
+      allParticipants  = [];
+      window.renderParticipantData({});
+      document.getElementById('session-selector').value = '';
+      document.getElementById('session-status-badge').innerHTML = '';
+    }
+    closeDeleteModal();
+    showToast('🗑️ Session deleted successfully');
+  } catch(e) {
+    showToast('❌ Delete failed — check Firebase permissions');
+    console.error(e);
+  }
+  btn.textContent = 'Delete Permanently'; btn.disabled = false;
+}
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
