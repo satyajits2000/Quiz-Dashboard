@@ -482,16 +482,23 @@ tr:last-child td { border-bottom:none; }
 
 <!-- Participant Detail Modal -->
 <div class="overlay" id="modal-participant">
-  <div class="modal" style="max-width:560px">
-    <div class="modal-title" id="pd-name">Participant Answers</div>
-    <div class="modal-sub" id="pd-meta">—</div>
-    <div id="pd-answers" style="max-height:420px;overflow-y:auto;margin-bottom:16px"></div>
-    <div class="modal-btns">
+  <div class="modal" style="max-width:740px;width:96vw;padding:24px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
+      <div style="flex:1">
+        <div class="modal-title" id="pd-name" style="font-size:1.2em;margin-bottom:3px">Participant Answers</div>
+        <div class="modal-sub" id="pd-meta" style="margin-bottom:0">&#8212;</div>
+      </div>
+      <button onclick="closePDModal()" style="background:none;border:none;font-size:1.5em;cursor:pointer;color:var(--muted);line-height:1;padding:2px 8px;border-radius:4px">&times;</button>
+    </div>
+    <div id="pd-scorebar" style="display:flex;align-items:center;gap:16px;background:var(--bg);border-radius:8px;padding:12px 18px;margin-bottom:16px;flex-wrap:wrap"></div>
+    <div id="pd-answers" style="max-height:390px;overflow-y:auto;padding-right:4px;margin-bottom:16px"></div>
+    <div class="modal-btns" style="flex-wrap:wrap;gap:8px">
       <button class="btn btn-ghost" onclick="closePDModal()">Close</button>
+      <button class="btn btn-teal btn-sm" onclick="exportSingleParticipant()" style="padding:8px 16px;font-size:0.82em">&#128229; Export This Participant</button>
+      <button class="btn btn-green" onclick="exportExcel()" style="padding:8px 16px;font-size:0.82em">&#128202; Export All to Excel</button>
     </div>
   </div>
 </div>
-
 <!-- Delete Session Modal -->
 <div class="overlay" id="modal-delete">
   <div class="modal" style="max-width:420px">
@@ -529,11 +536,11 @@ const firebaseConfig = {
 let db;
 try {
   if (firebaseConfig.apiKey === 'YOUR_API_KEY') {
-    console.warn('⚠️ Firebase not configured — fill in your config to enable live features');
+    console.warn('Firebase not configured');
   } else {
     const app = initializeApp(firebaseConfig, 'dashboard');
     db = getDatabase(app);
-    console.log('✅ Firebase connected');
+    console.log('Firebase connected');
   }
 } catch(e) { console.warn('Firebase init failed:', e.message); }
 
@@ -560,10 +567,8 @@ window.listenParticipants = function(sessionId) {
 
 window.firebaseCreateSession = async function(data) {
   if (!db) {
-    // Offline mode — store locally so the UI still works
     const fakeKey = 'local_' + Date.now();
     window._sessions = window._sessions || {};
-    // Mark all others inactive
     Object.keys(window._sessions).forEach(k => window._sessions[k].status = 'inactive');
     window._sessions[fakeKey] = data;
     window.renderSessions(window._sessions);
@@ -580,7 +585,7 @@ window.firebaseCreateSession = async function(data) {
     const nr = push(ref(db, 'sessions'));
     await set(nr, data);
     return nr.key;
-  } catch(e) { console.error('createSession error:', e); return null; }
+  } catch(e) { console.error(e); return null; }
 };
 
 window.loadSessions();
@@ -669,21 +674,15 @@ function loadSession(id) {
 }
 
 async function activateSession(id) {
-  if (!window._firebase?.db) {
-    showToast('⚠️ Firebase not configured — cannot activate');
-    return;
-  }
+  if (!window._firebase?.db) { showToast('Firebase not configured'); return; }
   try {
     const { db, ref, update } = window._firebase;
     const upd = {};
     Object.keys(window._sessions||{}).forEach(k => upd[`sessions/${k}/status`] = 'inactive');
     upd[`sessions/${id}/status`] = 'active';
     await update(ref(db), upd);
-    showToast('✅ Session activated!');
-  } catch(e) {
-    showToast('❌ Activate failed — check Firebase permissions');
-    console.error(e);
-  }
+    showToast('Session activated!');
+  } catch(e) { showToast('Activate failed - check Firebase permissions'); console.error(e); }
 }
 
 // ── Participant rendering ─────────────────────────────────────
@@ -862,18 +861,10 @@ document.getElementById('modal-overlay').addEventListener('click', e => { if (e.
 
 async function createSession() {
   const name = document.getElementById('m-name').value.trim();
-  if (!name) { showToast('⚠️ Session name is required'); return; }
-
-  // Check Firebase is ready
-  if (!window.firebaseCreateSession) {
-    showToast('⚠️ Firebase not ready — check your config');
-    return;
-  }
-
+  if (!name) { showToast('Session name is required'); return; }
+  if (!window.firebaseCreateSession) { showToast('Firebase not ready'); return; }
   const btn = document.querySelector('#modal-overlay .btn-red');
-  const orig = btn.textContent;
-  btn.textContent = 'Creating…'; btn.disabled = true;
-
+  const orig = btn.textContent; btn.textContent = 'Creating...'; btn.disabled = true;
   const data = {
     name,
     date       : document.getElementById('m-date').value,
@@ -885,51 +876,128 @@ async function createSession() {
     createdAt  : new Date().toISOString(),
     participants: {}
   };
-
   try {
     const key = await window.firebaseCreateSession(data);
     if (key) {
       closeModal();
-      showToast('✅ Session created and activated!');
+      showToast('Session created and activated!');
       ['m-name','m-loc','m-facilitator','m-notes'].forEach(id => document.getElementById(id).value='');
-      // Navigate to Sessions view so user can see the new session
       showView('sessions');
-    } else {
-      showToast('❌ Could not create session — check Firebase config');
-    }
-  } catch(e) {
-    showToast('❌ Error: ' + e.message);
-    console.error(e);
-  }
-
+    } else { showToast('Could not create session - check Firebase config'); }
+  } catch(e) { showToast('Error: ' + e.message); console.error(e); }
   btn.textContent = orig; btn.disabled = false;
 }
 
-// ── Export CSV ────────────────────────────────────────────────
-function exportCSV() {
-  const data = getFiltered().length ? getFiltered() : allParticipants;
-  if (!data.length) { showToast('No data to export'); return; }
-  const headers = ['Name','Entity','Department','Email','Quiz','Score','Total','Percentage','Progress','Status','StartTime','EndTime','Duration(s)'];
-  const rows = data.map(p => {
+// -- Export Excel (SheetJS)
+function loadSheetJS(cb) {
+  if (window.XLSX) { cb(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload = cb; s.onerror = () => showToast('Could not load Excel library');
+  document.head.appendChild(s);
+}
+
+function buildParticipantRows(participants) {
+  const maxQ = Math.max(...participants.map(p => getTotal(p)), 0);
+  const qHeaders = Array.from({length: maxQ}, (_, i) => 'Q' + (i+1));
+  const headers = [
+    'Name','Entity','Department','Email','Quiz',
+    'Score','Total','Percentage','Progress','Status',
+    'Start Time','End Time','Duration',
+    ...qHeaders
+  ];
+  const rows = participants.map(p => {
     const total = getTotal(p);
-    const score = p.finalScore??p.score??0;
-    const pct   = Math.round(score/total*100);
-    const dur   = (p.startTime&&p.endTime)?Math.round((new Date(p.endTime)-new Date(p.startTime))/1000):'';
+    const score = p.finalScore ?? p.score ?? 0;
+    const pct   = Math.round(score / total * 100);
+    const answers = p.answers || [];
+    let dur = '';
+    if (p.startTime && p.endTime) {
+      const s = Math.round((new Date(p.endTime) - new Date(p.startTime)) / 1000);
+      dur = s > 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+    }
+    const qCols = Array.from({length: maxQ}, (_, i) => {
+      const a = answers[i];
+      if (!a) return '-';
+      return a.correct ? 'Correct' : 'Incorrect';
+    });
     return [
       p.name||'', p.entity||'', p.dept||'', p.email||'',
-      p.quiz==='redbook'?'Red Book':'Quality Days',
+      p.quiz==='redbook' ? 'Red Book' : 'Quality Days',
       score, total, pct+'%', `${p.progress||0}/${total}`, p.status||'',
-      p.startTime?new Date(p.startTime).toLocaleString():'',
-      p.endTime?new Date(p.endTime).toLocaleString():'', dur
-    ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
+      p.startTime ? new Date(p.startTime).toLocaleString() : '',
+      p.endTime   ? new Date(p.endTime).toLocaleString()   : '',
+      dur, ...qCols
+    ];
   });
-  const csv = [headers.join(','),...rows].join('\n');
-  const a   = document.createElement('a');
-  a.href     = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
-  a.download = `SYSTRA_Quiz_${new Date().toISOString().split('T')[0]}.csv`;
-  a.click();
-  showToast('✅ CSV exported!');
+  return { headers, rows };
 }
+
+function exportExcel() {
+  const data = allParticipants;
+  if (!data.length) { showToast('No data to export'); return; }
+  loadSheetJS(() => {
+    try {
+      const wb = XLSX.utils.book_new();
+      // Sheet 1 — All participants with Q columns
+      const { headers, rows } = buildParticipantRows(data);
+      const ws1 = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      ws1['!cols'] = headers.map((h,i) => ({ wch: i < 13 ? Math.max(h.length+2,14) : 12 }));
+      XLSX.utils.book_append_sheet(wb, ws1, 'All Participants');
+      // Sheet 2 — Completed only (clean summary)
+      const done = data.filter(p => p.status === 'completed');
+      if (done.length) {
+        const s2h = ['Name','Entity','Department','Email','Quiz','Score','Total','Percentage','Duration'];
+        const s2r = done.map(p => {
+          const t=getTotal(p), sc=p.finalScore??p.score??0, pc=Math.round(sc/t*100);
+          let dur=''; if(p.startTime&&p.endTime){const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000);dur=s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;}
+          return [p.name||'',p.entity||'',p.dept||'',p.email||'',p.quiz==='redbook'?'Red Book':'Quality Days',sc,t,pc+'%',dur];
+        });
+        const ws2 = XLSX.utils.aoa_to_sheet([s2h,...s2r]);
+        ws2['!cols'] = s2h.map(h=>({wch:Math.max(h.length+2,14)}));
+        XLSX.utils.book_append_sheet(wb, ws2, 'Completed');
+      }
+      XLSX.writeFile(wb, `SYSTRA_Quiz_${new Date().toISOString().split('T')[0]}.xlsx`);
+      showToast('Excel exported!');
+    } catch(e) { showToast('Export failed: ' + e.message); console.error(e); }
+  });
+}
+
+function exportSingleParticipant() {
+  const p = _currentParticipant;
+  if (!p) return;
+  loadSheetJS(() => {
+    try {
+      const total = getTotal(p), score = p.finalScore??p.score??0, pct = Math.round(score/total*100);
+      const answers = p.answers || [];
+      let dur=''; if(p.startTime&&p.endTime){const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000);dur=s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;}
+      const wb = XLSX.utils.book_new();
+      // Details sheet
+      const ws1 = XLSX.utils.aoa_to_sheet([
+        ['Field','Value'],
+        ['Name', p.name||''],['Entity',p.entity||''],['Department',p.dept||''],['Email',p.email||''],
+        ['Quiz', p.quiz==='redbook'?'Red Book':'Quality Days'],
+        ['Score', score+' / '+total],['Percentage',pct+'%'],
+        ['Status',p.status||''],
+        ['Start Time', p.startTime?new Date(p.startTime).toLocaleString():''],
+        ['End Time',   p.endTime  ?new Date(p.endTime).toLocaleString()  :''],
+        ['Duration', dur],
+      ]);
+      ws1['!cols'] = [{wch:16},{wch:32}];
+      XLSX.utils.book_append_sheet(wb, ws1, 'Details');
+      // Answers sheet
+      const ansRows = [['Question','Result']];
+      for (let i=0;i<total;i++){const a=answers[i];ansRows.push(['Q'+(i+1),!a?'Not answered':a.correct?'Correct':'Incorrect']);}
+      const ws2 = XLSX.utils.aoa_to_sheet(ansRows);
+      ws2['!cols'] = [{wch:12},{wch:18}];
+      XLSX.utils.book_append_sheet(wb, ws2, 'Answers');
+      XLSX.writeFile(wb, `SYSTRA_${(p.name||'participant').replace(/[^a-z0-9]/gi,'_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      showToast('Exported!');
+    } catch(e) { showToast('Export failed: '+e.message); console.error(e); }
+  });
+}
+
+function exportCSV() { exportExcel(); }
 
 function refreshData() {
   if (currentSessionId&&window.listenParticipants) window.listenParticipants(currentSessionId);
@@ -942,57 +1010,84 @@ function decodeP(encoded) {
   try { return JSON.parse(decodeURIComponent(encoded)); } catch { return {}; }
 }
 
-// ── Participant answer drill-down ─────────────────────────────
+// -- Current participant for single export
+let _currentParticipant = null;
+
+// -- Participant answer drill-down
 function openParticipant(p) {
-  const total = getTotal(p);
-  const score = p.finalScore ?? p.score ?? 0;
-  const pct   = Math.round((score / total) * 100);
-  const dur   = (p.startTime && p.endTime)
-    ? (() => { const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000); return s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`; })()
-    : '—';
-
-  document.getElementById('pd-name').textContent = (p.name || '—') + (p.entity ? ' · ' + p.entity : '');
-  document.getElementById('pd-meta').innerHTML =
-    '<b>' + (p.quiz==='redbook'?'📕 Red Book':'✅ Quality Days') + '</b> &nbsp;·&nbsp; ' +
-    'Score: <b style="color:' + scoreColor(pct) + '">' + score + '/' + total + ' (' + pct + '%)</b> &nbsp;·&nbsp; ' +
-    '<span class="badge ' + (p.status==='completed'?'b-green':'b-amber') + '">' + (p.status==='completed'?'Completed':'In Progress') + '</span>' +
-    (p.dept  ? ' &nbsp;·&nbsp; ' + p.dept  : '') +
-    (p.email ? ' &nbsp;·&nbsp; ' + p.email : '') +
-    ' &nbsp;·&nbsp; ⏱ ' + dur;
-
-  const container = document.getElementById('pd-answers');
-  const answers   = p.answers || [];
-  const correct   = answers.filter(function(a){return a.correct;}).length;
-  const incorrect = answers.length - correct;
+  _currentParticipant = p;
+  const total   = getTotal(p);
+  const score   = p.finalScore ?? p.score ?? 0;
+  const pct     = Math.round((score / total) * 100);
+  const color   = scoreColor(pct);
+  const answers = p.answers || [];
+  const correct    = answers.filter(a => a && a.correct).length;
+  const incorrect  = answers.filter(a => a && !a.correct).length;
   const unanswered = total - answers.length;
+  const dur = (p.startTime && p.endTime)
+    ? (() => { const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000); return s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`; })()
+    : '\u2014';
 
-  // Build a row for every question 1..total
-  var rows = '';
-  for (var i = 0; i < total; i++) {
-    var a = answers[i];
+  document.getElementById('pd-name').textContent = (p.name || '\u2014') + (p.entity ? ' \u00b7 ' + p.entity : '');
+  document.getElementById('pd-meta').innerHTML =
+    '<b>' + (p.quiz==='redbook'?'Red Book':'Quality Days') + '</b>' +
+    (p.dept  ? ' &nbsp;&middot;&nbsp; ' + p.dept  : '') +
+    (p.email ? ' &nbsp;&middot;&nbsp; ' + p.email : '') +
+    ' &nbsp;&middot;&nbsp; &#9201; ' + dur;
+
+  // Score bar
+  document.getElementById('pd-scorebar').innerHTML =
+    `<div style="width:68px;height:68px;border-radius:50%;background:conic-gradient(${color} ${pct*3.6}deg,#e8edf0 0deg);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+       <div style="width:52px;height:52px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center">
+         <span style="font-size:1.05em;font-weight:800;color:${color};line-height:1">${pct}%</span>
+       </div>
+     </div>` +
+    `<div style="flex:1;min-width:180px">
+       <div style="font-size:1.1em;font-weight:700;color:${color};margin-bottom:4px">${score} / ${total} correct</div>
+       <div style="height:8px;background:#e8edf0;border-radius:4px;overflow:hidden;margin-bottom:8px">
+         <div style="height:100%;width:${pct}%;background:${color};border-radius:4px;transition:width 0.8s"></div>
+       </div>
+       <div style="display:flex;gap:16px;font-size:0.8em;flex-wrap:wrap">
+         <span style="color:var(--green);font-weight:700">&#10003; ${correct} correct</span>
+         <span style="color:var(--red);font-weight:700">&#10007; ${incorrect} incorrect</span>
+         ${unanswered>0?`<span style="color:var(--muted)">\u2013 ${unanswered} unanswered</span>`:''}
+         <span style="color:var(--muted);margin-left:auto">${answers.length}/${total} answered</span>
+       </div>
+     </div>` +
+    `<div style="text-align:center">
+       <span class="badge ${p.status==='completed'?'b-green':'b-amber'}">${p.status==='completed'?'Completed':'In Progress'}</span>
+     </div>`;
+
+  // Answer cards
+  let cards = '';
+  for (let i = 0; i < total; i++) {
+    const a = answers[i];
     if (!a) {
-      rows += '<div class="ans-row"><div class="ans-num" style="background:#f0f2f4;color:var(--muted);font-size:1em">–</div>' +
-              '<div class="ans-text"><div class="ans-label">Q' + (i+1) + '</div>' +
-              '<span style="color:var(--muted);font-style:italic">Not yet answered</span></div></div>';
+      cards += `<div style="border:1.5px solid #e8edf0;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;background:#fafcfd">
+        <div style="width:30px;height:30px;border-radius:50%;background:#f0f2f4;display:flex;align-items:center;justify-content:center;font-size:0.8em;font-weight:700;color:var(--muted);flex-shrink:0">Q${i+1}</div>
+        <div style="font-size:0.82em;color:var(--muted);font-style:italic">Not answered</div>
+      </div>`;
     } else if (a.correct) {
-      rows += '<div class="ans-row"><div class="ans-num ans-ok" style="font-size:1em">✓</div>' +
-              '<div class="ans-text"><div class="ans-label">Q' + (i+1) + '</div>' +
-              '<span style="color:var(--green);font-weight:700">Correct</span></div></div>';
+      cards += `<div style="border:1.5px solid #c8e6c9;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;background:#f1f8f1">
+        <div style="width:30px;height:30px;border-radius:50%;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:1.1em;flex-shrink:0;color:var(--green);font-weight:700">&#10003;</div>
+        <div>
+          <div style="font-size:0.72em;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted)">Q${i+1}</div>
+          <div style="font-size:0.85em;font-weight:700;color:var(--green)">Correct</div>
+        </div>
+      </div>`;
     } else {
-      rows += '<div class="ans-row"><div class="ans-num ans-fail" style="font-size:1em">✗</div>' +
-              '<div class="ans-text"><div class="ans-label">Q' + (i+1) + '</div>' +
-              '<span style="color:var(--red);font-weight:700">Incorrect</span></div></div>';
+      cards += `<div style="border:1.5px solid #f5c2c2;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;background:#fef5f5">
+        <div style="width:30px;height:30px;border-radius:50%;background:#fdecea;display:flex;align-items:center;justify-content:center;font-size:1.1em;flex-shrink:0;color:var(--red);font-weight:700">&#10007;</div>
+        <div>
+          <div style="font-size:0.72em;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted)">Q${i+1}</div>
+          <div style="font-size:0.85em;font-weight:700;color:var(--red)">Incorrect</div>
+        </div>
+      </div>`;
     }
   }
 
-  container.innerHTML =
-    '<div style="background:var(--grey);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:0.83em;display:flex;gap:20px;flex-wrap:wrap;align-items:center">' +
-    '<span style="color:var(--green);font-weight:700">✓ ' + correct + ' correct</span>' +
-    '<span style="color:var(--red);font-weight:700">✗ ' + incorrect + ' incorrect</span>' +
-    (unanswered > 0 ? '<span style="color:var(--muted)">– ' + unanswered + ' unanswered</span>' : '') +
-    '<span style="color:var(--muted);margin-left:auto">' + answers.length + '/' + total + ' answered</span>' +
-    '</div>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px">' + rows + '</div>';
+  document.getElementById('pd-answers').innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">' + cards + '</div>';
 
   document.getElementById('modal-participant').classList.add('open');
 }
