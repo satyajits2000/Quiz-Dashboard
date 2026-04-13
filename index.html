@@ -271,7 +271,7 @@ tr:last-child td { border-bottom:none; }
       <div class="brand-systra">SYSTRA</div>
       <div class="brand-sub">DCI · Quiz Dashboard</div>
     </div>
-    <div class="nav-section">
+        <div class="nav-section">
       <div class="nav-label">Navigation</div>
       <div class="nav-item active" onclick="showView('dashboard')"><span class="ico">📊</span>Dashboard</div>
       <div class="nav-item" onclick="showView('participants')"><span class="ico">👥</span>Participants</div>
@@ -297,10 +297,12 @@ tr:last-child td { border-bottom:none; }
           <div class="topbar-title">Live Dashboard</div>
           <div class="topbar-sub">Real-time quiz participation tracking</div>
         </div>
-        <div class="topbar-actions">
+        <div class="topbar-actions" style="align-items:center;gap:10px">
+          <img src="dci-logo.png" alt="DCI Logo" style="height:44px;width:auto;display:block">
+          <div style="width:1px;height:28px;background:var(--border)"></div>
           <button class="btn btn-ghost btn-sm" onclick="refreshData()">🔄 Refresh</button>
           <button class="btn btn-red btn-sm" onclick="openModal()">+ New Session</button>
-        </div>
+        </div>        </div>
       </div>
 
       <!-- Session selector -->
@@ -556,6 +558,7 @@ const firebaseConfig = {
   appId: "1:200263271557:web:24908b21ce8d7bb1a795ec",
   measurementId: "G-7C8C9Y2TJH"
 };
+
 
 let db;
 try {
