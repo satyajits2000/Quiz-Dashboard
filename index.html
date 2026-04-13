@@ -533,6 +533,7 @@ const firebaseConfig = {
   measurementId: "G-7C8C9Y2TJH"
 };
 
+
 let db;
 try {
   if (firebaseConfig.apiKey === 'YOUR_API_KEY') {
@@ -749,7 +750,7 @@ function renderRecent(participants) {
     const total = getTotal(p);
     const score = p.finalScore??p.score??0;
     const pct   = Math.round(score/total*100);
-    const prog  = Math.round((p.progress||0)/total*100);
+    const prog  = Math.round((Math.min(p.progress||0, total))/total*100);
     return `<tr>
       <td><b>${p.name||'—'}</b></td>
       <td style="color:var(--muted)">${p.entity||'—'}</td>
@@ -758,7 +759,7 @@ function renderRecent(participants) {
         <div class="prog-mini"><div class="prog-fill" style="width:${pct}%;background:${scoreColor(pct)}"></div></div></td>
       <td>
         <div class="prog-mini"><div class="prog-fill" style="width:${prog}%;background:var(--teal)"></div></div>
-        <span style="font-size:0.76em;color:var(--muted);margin-left:4px">${p.progress||0}/${total}</span>
+        <span style="font-size:0.76em;color:var(--muted);margin-left:4px">${Math.min(p.progress||0,total)}/${total}</span>
       </td>
       <td><span class="badge ${p.status==='completed'?'b-green':p.status==='in_progress'?'b-amber':'b-grey'}">${p.status==='completed'?'✅ Done':p.status==='in_progress'?'⏳ Active':'—'}</span></td>
       <td style="color:var(--muted);font-size:0.78em">${p.startTime?new Date(p.startTime).toLocaleTimeString():''}</td>
@@ -773,7 +774,7 @@ function renderAll(participants) {
     const total = getTotal(p);
     const score = p.finalScore??p.score??0;
     const pct   = Math.round(score/total*100);
-    const prog  = Math.round((p.progress||0)/total*100);
+    const prog  = Math.round((Math.min(p.progress||0, total))/total*100);
     let dur = '—';
     if (p.startTime&&p.endTime) { const s=Math.round((new Date(p.endTime)-new Date(p.startTime))/1000); dur=s>60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`; }
     const pJson = encodeURIComponent(JSON.stringify(p));
@@ -786,7 +787,7 @@ function renderAll(participants) {
       <td><button class="btn btn-teal btn-sm" onclick="openParticipant(decodeP('${pJson}'))">📋 Answers</button></td>
       <td>${p.quiz==='redbook'?'📕 Red Book':'✅ Quality Days'}</td>
       <td><span style="font-weight:700;color:${scoreColor(pct)}">${score}/${total} (${pct}%)</span></td>
-      <td><div class="prog-mini"><div class="prog-fill" style="width:${prog}%;background:var(--teal)"></div></div> <span style="font-size:0.76em;color:var(--muted)">${p.progress||0}/${total}</span></td>
+      <td><div class="prog-mini"><div class="prog-fill" style="width:${prog}%;background:var(--teal)"></div></div> <span style="font-size:0.76em;color:var(--muted)">${Math.min(p.progress||0,total)}/${total}</span></td>
       <td><span class="badge ${p.status==='completed'?'b-green':p.status==='in_progress'?'b-amber':'b-grey'}">${p.status==='completed'?'✅ Done':p.status==='in_progress'?'⏳ Active':'—'}</span></td>
       <td style="color:var(--muted);font-size:0.78em">${p.startTime?new Date(p.startTime).toLocaleString():''}</td>
       <td style="color:var(--muted)">${dur}</td>
@@ -924,7 +925,7 @@ function buildParticipantRows(participants) {
     return [
       p.name||'', p.entity||'', p.dept||'', p.email||'',
       p.quiz==='redbook' ? 'Red Book' : 'Quality Days',
-      score, total, pct+'%', `${p.progress||0}/${total}`, p.status||'',
+      score, total, pct+'%', `${Math.min(p.progress||0,total)}/${total}`, p.status||'',
       p.startTime ? new Date(p.startTime).toLocaleString() : '',
       p.endTime   ? new Date(p.endTime).toLocaleString()   : '',
       dur, ...qCols
